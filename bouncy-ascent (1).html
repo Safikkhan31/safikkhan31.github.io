@@ -33,7 +33,7 @@
 
   #adSlot{
     flex:0 0 auto;width:100%;min-height:50px;
-    background:#120a17;display:none;align-items:center;justify-content:center;
+    background:#120a17;display:flex;align-items:center;justify-content:center;
     overflow:hidden;
   }
 
@@ -172,26 +172,7 @@
 </div>
 
 <script>
-  (function(){
-    // The ad box is hidden by default so it never shows as a bare dark bar.
-    // We only reveal it once AdSense confirms an ad actually filled the slot.
-    const slot = document.getElementById('adSlot');
-    const ins = slot.querySelector('.adsbygoogle');
-    try{
-      (window.adsbygoogle = window.adsbygoogle || []).push({});
-    }catch(e){ return; }
-    let checks = 0;
-    const iv = setInterval(()=>{
-      checks++;
-      const status = ins.getAttribute('data-ad-status');
-      if (status === 'filled'){
-        slot.style.display = 'flex';
-        clearInterval(iv);
-      } else if (status === 'unfilled' || checks > 20){ // ~6s: give up quietly, stay hidden
-        clearInterval(iv);
-      }
-    }, 300);
-  })();
+  try{ (window.adsbygoogle = window.adsbygoogle || []).push({}); }catch(e){}
 </script>
 
 <script>
@@ -270,19 +251,20 @@
     document.getElementById('muteBtn').textContent = muted ? '🔇' : '🔊';
   });
 
-  // ---------- Persistent best score (plain localStorage — works on any host) ----------
+  // ---------- Persistent best score ----------
   let bestHeightSaved = 0;
-  try{
-    const raw = localStorage.getItem('bestHeight');
-    if (raw){
-      const v = JSON.parse(raw);
-      if (typeof v.best === 'number') bestHeightSaved = v.best;
-      document.getElementById('bestNum').textContent = Math.round(bestHeightSaved) + 'm';
-    }
-  }catch(e){ /* storage unavailable (e.g. private browsing) — just skip persistence */ }
-
-  function saveBest(val){
-    try{ localStorage.setItem('bestHeight', JSON.stringify({best: val})); }catch(e){}
+  (async function loadBest(){
+    try{
+      const res = await window.storage.get('bestHeight', false);
+      if (res && res.value){
+        const v = JSON.parse(res.value);
+        if (typeof v.best === 'number') bestHeightSaved = v.best;
+        document.getElementById('bestNum').textContent = Math.round(bestHeightSaved) + 'm';
+      }
+    }catch(e){ /* no saved score yet */ }
+  })();
+  async function saveBest(val){
+    try{ await window.storage.set('bestHeight', JSON.stringify({best: val}), false); }catch(e){}
   }
 
   // ---------- Constants ----------
