@@ -39,7 +39,7 @@
 
   .hud{position:absolute;pointer-events:none;color:var(--ink);z-index:5;}
   #heightReadout{
-    top:14px;left:50%;transform:translateX(-50%);
+    top:40px;left:50%;transform:translateX(-50%);
     text-align:center;
   }
   #heightReadout .num{
@@ -117,6 +117,35 @@
     position:absolute;inset:0;background:#ff2b3d;opacity:0;pointer-events:none;
     z-index:8;transition:opacity 0.08s linear;
   }
+
+  /* ---------- Auth ---------- */
+  #authOverlay{ z-index:20; }
+  .authForm{ display:flex; flex-direction:column; gap:10px; text-align:left; }
+  .authForm label{ font-size:12px; color:var(--ink-dim); font-weight:600; }
+  .authForm input{
+    width:100%; padding:10px 12px; border-radius:10px; font-size:15px;
+    border:1px solid var(--panel-border); background:rgba(244,239,230,0.08);
+    color:var(--ink); outline:none;
+  }
+  .authForm input:focus{ border-color:var(--accent); }
+  .authError{
+    min-height:16px; font-size:12px; color:#ff8a8a; margin:2px 0 0; text-align:left;
+  }
+  .authSwitch{
+    margin-top:14px; font-size:13px; color:var(--ink-dim);
+  }
+  .authSwitch a{ color:var(--ink); font-weight:700; text-decoration:underline; cursor:pointer; }
+  .authSubmit{ margin-top:4px; width:100%; }
+  .authSpinner{ opacity:0.6; pointer-events:none; }
+
+  #userBar{
+    position:absolute; top:14px; left:60px; right:60px; z-index:5;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    pointer-events:none; color:var(--ink-dim); font-size:10px; font-weight:600;
+  }
+  #userBar #logoutBtn{
+    pointer-events:auto; cursor:pointer; text-decoration:underline; color:var(--ink-dim);
+  }
 </style>
 </head>
 <body>
@@ -142,7 +171,36 @@
 
     <div class="hud" id="bounceCounter">Bounces: 0</div>
 
-    <div class="overlay" id="introOverlay">
+    <div class="hud" id="userBar"></div>
+
+    <div class="overlay" id="authOverlay">
+      <div class="card">
+        <h1 id="authTitle">Log in</h1>
+        <p>Sign in to save your high score and climb the leaderboard.</p>
+        <form class="authForm" id="loginForm">
+          <label>Username</label>
+          <input type="text" id="loginUsername" autocomplete="username" required minlength="3" maxlength="20">
+          <label>Password</label>
+          <input type="password" id="loginPassword" autocomplete="current-password" required minlength="6">
+          <p class="authError" id="loginError"></p>
+          <button type="submit" class="primary authSubmit" id="loginSubmit">Log in</button>
+        </form>
+        <form class="authForm hidden" id="signupForm">
+          <label>Username</label>
+          <input type="text" id="signupUsername" autocomplete="username" required minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]+" title="Letters, numbers, and underscores only">
+          <label>Password</label>
+          <input type="password" id="signupPassword" autocomplete="new-password" required minlength="6">
+          <p class="authError" id="signupError"></p>
+          <button type="submit" class="primary authSubmit" id="signupSubmit">Sign up</button>
+        </form>
+        <div class="authSwitch">
+          <span id="toSignupWrap">New here? <a id="toSignup">Create an account</a></span>
+          <span id="toLoginWrap" class="hidden">Already have an account? <a id="toLogin">Log in</a></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay hidden" id="introOverlay">
       <div class="card">
         <h1>Ascent</h1>
         <p>Drag anywhere and let go to launch the ball. It bounces off walls and ledges and settles once it slows down — then you can launch again. Climb as high as you can. The higher you go, the trickier it gets.</p>
@@ -198,6 +256,8 @@
     }, 300);
   })();
 </script>
+
+<script src="auth.js"></script>
 
 <script>
 (function(){
@@ -275,7 +335,9 @@
     document.getElementById('muteBtn').textContent = muted ? '🔇' : '🔊';
   });
 
-  // ---------- Persistent best score (plain localStorage — works on any host) ----------
+  // ---------- Persistent best score ----------
+  // localStorage is used as an instant/offline fallback; the server (via
+  // window.AscentAuth) is the source of truth once the player is logged in.
   let bestHeightSaved = 0;
   try{
     const raw = localStorage.getItem('bestHeight');
@@ -289,6 +351,34 @@
   function saveBest(val){
     try{ localStorage.setItem('bestHeight', JSON.stringify({best: val})); }catch(e){}
   }
+
+  // Called any time the player reaches a new personal-best altitude —
+  // whether or not they go on to finish the whole climb. Updates the local
+  // display immediately and pings the server so the account's high score
+  // stays current even on runs that end without a full win.
+  function recordPotentialNewBest(m){
+    if (m <= bestHeightSaved) return;
+    bestHeightSaved = m;
+    saveBest(bestHeightSaved);
+    document.getElementById('bestNum').textContent = bestHeightSaved + 'm';
+    if (window.AscentAuth && typeof window.AscentAuth.reportProgress === 'function'){
+      window.AscentAuth.reportProgress(m).catch(()=>{ /* offline — local save still stands */ });
+    }
+  }
+
+  // Once the auth layer confirms who's logged in, trust the server's stored
+  // high score (it may be higher than this browser's localStorage if the
+  // player has played on another device).
+  window.addEventListener('ascent:authready', (e)=>{
+    const user = e.detail && e.detail.user;
+    if (user && typeof user.highScore === 'number' && user.highScore > bestHeightSaved){
+      bestHeightSaved = user.highScore;
+      saveBest(bestHeightSaved);
+      document.getElementById('bestNum').textContent = Math.round(bestHeightSaved) + 'm';
+      updateHud();
+    }
+    document.getElementById('introOverlay').classList.remove('hidden');
+  });
 
   // ---------- Constants ----------
   const GRAVITY = 2600;
@@ -592,6 +682,7 @@
           checkpoint = { x: ball.x, y: ball.y };
           beep(660, 0.07, 'sine', 0.08);
           setTimeout(()=>beep(880, 0.09, 'sine', 0.08), 70);
+          recordPotentialNewBest(metersOf(-checkpoint.y));
         }
       }
     } else {
@@ -616,13 +707,26 @@
 
   function onWin(){
     const m = metersOf(-bestY);
-    if (m > bestHeightSaved){ bestHeightSaved = m; saveBest(bestHeightSaved); }
+    recordPotentialNewBest(m);
     document.getElementById('bestNum').textContent = bestHeightSaved + 'm';
     document.getElementById('winStats').textContent = 'Height reached: ' + m + 'm · Bounces: ' + bounces;
     document.getElementById('winOverlay').classList.remove('hidden');
     beep(523,0.14,'triangle',0.15);
     setTimeout(()=>beep(659,0.16,'triangle',0.15), 120);
     setTimeout(()=>beep(784,0.22,'triangle',0.16), 260);
+
+    // Report the completed run (with bounce count) so gamesPlayed/totalBounces
+    // reflect an actual finish, not just a progress checkpoint.
+    if (window.AscentAuth && typeof window.AscentAuth.submitScore === 'function'){
+      window.AscentAuth.submitScore(m, bounces).then((result)=>{
+        if (result && typeof result.highScore === 'number' && result.highScore > bestHeightSaved){
+          bestHeightSaved = result.highScore;
+          saveBest(bestHeightSaved);
+          document.getElementById('bestNum').textContent = bestHeightSaved + 'm';
+          updateHud();
+        }
+      }).catch(()=>{ /* offline or server unavailable — local save still stands */ });
+    }
   }
 
   // moving platforms update (independent of ball physics timing quirks)
