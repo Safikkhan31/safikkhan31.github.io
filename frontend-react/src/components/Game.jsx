@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Leaderboard from './Leaderboard.jsx';
 
 // This component ports the original game's canvas engine (physics, procedural
 // platforms, rendering, input, HUD) essentially line-for-line into a single
@@ -16,6 +17,7 @@ import { useEffect, useRef } from 'react';
 //      re-run, unlike a plain <script> tag.
 export default function Game({ user, onLogout, onSubmitScore, onReportProgress }) {
   const canvasWrapRef = useRef(null);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -311,6 +313,12 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
     }
     restartBtn.addEventListener('click', onRestartClick);
 
+    const leaderboardBtn = document.getElementById('leaderboardBtn');
+    function onLeaderboardClick() {
+      setShowLeaderboard(true);
+    }
+    leaderboardBtn.addEventListener('click', onLeaderboardClick);
+
     // ---------- Physics ----------
     function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
       const closestX = Math.max(rx, Math.min(cx, rx + rw));
@@ -514,8 +522,10 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
 
     // ---------- HUD ----------
     function updateHud() {
-      const m = metersOf(-bestY);
-      document.getElementById('heightNum').textContent = m + 'm';
+      const liveM = metersOf(-ball.y);
+      document.getElementById('liveNum').textContent = liveM + 'm';
+      const currentM = metersOf(-checkpoint.y);
+      document.getElementById('heightNum').textContent = currentM + 'm';
       document.getElementById('bounceCounter').textContent = 'Bounces: ' + bounces;
       const pct = Math.min(1, Math.max(0, (-bestY) / TOTAL_HEIGHT));
       document.getElementById('progressFill').style.height = (pct * 100) + '%';
@@ -806,6 +816,7 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       startBtn.removeEventListener('click', onStartClick);
       playAgainBtn.removeEventListener('click', onPlayAgainClick);
       restartBtn.removeEventListener('click', onRestartClick);
+      leaderboardBtn.removeEventListener('click', onLeaderboardClick);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -816,7 +827,8 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       <div id="flash"></div>
 
       <div className="hud" id="heightReadout">
-        <div className="num" id="heightNum">0m</div>
+        <div className="num" id="liveNum">0m</div>
+        <div className="lbl">CURRENT <span id="heightNum">0m</span></div>
         <div className="lbl">BEST <span id="bestNum">0m</span></div>
       </div>
 
@@ -828,6 +840,7 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
 
       <div className="btn" id="restartBtn" title="Restart">↺</div>
       <div className="btn" id="muteBtn" title="Mute">🔊</div>
+      <div className="pillBtn" id="leaderboardBtn">Leaderboard</div>
 
       <div className="hud" id="bounceCounter">Bounces: 0</div>
 
@@ -859,6 +872,8 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
           <button className="primary" id="playAgainBtn">Climb again</button>
         </div>
       </div>
+
+      {showLeaderboard && <Leaderboard onClose={() => setShowLeaderboard(false)} />}
     </div>
   );
 }
