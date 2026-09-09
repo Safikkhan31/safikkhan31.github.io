@@ -341,6 +341,10 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       return { nx, ny, pen: r - dist };
     }
 
+    // Kept intact and fully working, but nothing calls it automatically
+    // anymore (see the hazard/fall-off handling in physicsStep below). This
+    // is here so a future "watch an ad to respawn at your checkpoint"
+    // feature can just call this directly without rebuilding the reset logic.
     function respawnAtCheckpoint(hazard) {
       ball.x = checkpoint.x; ball.y = checkpoint.y;
       ball.vx = 0; ball.vy = 0;
@@ -396,11 +400,6 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
         const col = circleRectCollision(ball.x, ball.y, BALL_RADIUS, p.x, p.y, p.w, p.h);
         if (!col) continue;
 
-        if (p.type === 'hazard') {
-          respawnAtCheckpoint(true);
-          return;
-        }
-
         ball.x += col.nx * col.pen;
         ball.y += col.ny * col.pen;
 
@@ -414,17 +413,28 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
           ball.vy = vty + nvn * col.ny;
 
           if (Math.abs(vn) > 90) {
-            bounces++;
-            const impact = Math.min(1, Math.abs(vn) / 2400);
-            ball.squashAmt = Math.max(0.42, 1 - impact * 0.62);
-            ball.squashVel = 0;
-            ball.squashAngle = Math.atan2(col.ny, col.nx);
-            const f = 210 + Math.min(300, Math.abs(vn) / 5);
-            beep(f, 0.08, 'triangle', Math.min(0.2, 0.05 + impact * 0.16));
+            if (p.type === 'hazard') {
+              // No more free reset to checkpoint — a hazard now just hurts
+              // (flash/shake/buzz) and bounces you like a rough platform.
+              // You keep whatever position/momentum you land with.
+              flashTime = 0.16;
+              shakeTime = 0.25; shakeMag = 10;
+              beep(140, 0.22, 'sawtooth', 0.15);
+            } else {
+              bounces++;
+              const impact = Math.min(1, Math.abs(vn) / 2400);
+              ball.squashAmt = Math.max(0.42, 1 - impact * 0.62);
+              ball.squashVel = 0;
+              ball.squashAngle = Math.atan2(col.ny, col.nx);
+              const f = 210 + Math.min(300, Math.abs(vn) / 5);
+              beep(f, 0.08, 'triangle', Math.min(0.2, 0.05 + impact * 0.16));
+            }
           }
         }
         hadContact = true;
-        if (col.ny < -0.55) frameStanding = p;
+        // Hazards are dangerous ground, never a safe place to "stand" —
+        // they can't become your checkpoint or stop a fall into resting.
+        if (col.ny < -0.55 && p.type !== 'hazard') frameStanding = p;
       }
 
       // moving platform carry
@@ -463,10 +473,19 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
 
       if (ball.y < bestY) bestY = ball.y;
 
-      // fell off screen below view -> respawn
-      const bottomVisible = cameraTop + viewH;
-      if (ball.y - BALL_RADIUS > bottomVisible + 140) {
-        respawnAtCheckpoint(false);
+      // Hard floor — without the old "fell off screen" respawn, a long fall
+      // needs a guaranteed backstop so the ball can never tunnel through the
+      // thin ground platform in one big step at high fall speed. This isn't
+      // a checkpoint respawn: it's just the bottom of the world. Landing
+      // here means the whole run's progress above the ground is lost — you
+      // start climbing again from scratch, which is the point.
+      const floorY = -BALL_RADIUS;
+      if (ball.y > floorY) {
+        ball.y = floorY;
+        ball.x = Math.min(GAME_WIDTH - BALL_RADIUS, Math.max(BALL_RADIUS, ball.x));
+        ball.vx = 0; ball.vy = 0;
+        ball.isResting = true; ball.restTimer = 99; ball.standingOn = null;
+        ball.squashAmt = 1; ball.squashVel = 0;
       }
 
       // win check
