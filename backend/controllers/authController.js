@@ -15,6 +15,7 @@ function publicUser(user) {
     highScore: user.highScore,
     totalBounces: user.totalBounces,
     gamesPlayed: user.gamesPlayed,
+    role: user.role,
   };
 }
 

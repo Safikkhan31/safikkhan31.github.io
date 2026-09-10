@@ -137,7 +137,29 @@ Authorization: Bearer <token>
 
 ---
 
-## 5. Notes / next steps you might want
+## 5. Admin: ball trajectory debug tool
+
+Any account can be promoted to `admin` for testing purposes. Admins see an
+extra "Trajectory" toggle button in-game (top-left) that:
+- draws the ball's **actual** flight path (magenta line) since its last launch, and
+- while aiming, draws a **predicted** flight path (dashed cyan line) showing
+  exactly where the current drag would send the ball if released now — pure
+  ballistics simulation, no collisions — using the same physics as the real
+  game. Useful for verifying the platform-reachability guarantees while
+  testing.
+
+Promoting an account requires direct server/database access (deliberately
+not exposed as an API endpoint, so nobody can grant themselves admin):
+```bash
+cd backend
+node scripts/makeAdmin.js <username>            # promote
+node scripts/makeAdmin.js <username> --revoke    # demote back to a normal user
+```
+The `role` field (`'user'` | `'admin'`) is returned in the `/auth/me`,
+`/auth/login`, and `/auth/signup` responses, so both frontends already pick
+it up automatically on login — no other setup needed.
+
+## 6. Notes / next steps you might want
 
 - Add rate limiting (e.g. `express-rate-limit`) on `/auth/*` to slow down
   brute-force attempts.
