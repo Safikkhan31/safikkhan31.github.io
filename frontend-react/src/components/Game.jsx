@@ -202,7 +202,6 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       platforms.push({ x: 0, y: 0, w: GAME_WIDTH, h: 40, type: 'ground' });
       genState.highestGeneratedY = 0;
       genState.lastCenterX = GAME_WIDTH / 2;
-      genState.lastWidth = GAME_WIDTH;
       checkpoint = { x: ball.x, y: ball.y };
       bestY = ball.y;
       bounces = 0;
@@ -218,87 +217,50 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
     }
 
     // ---------- Procedural generation ----------
-    const genState = { highestGeneratedY: 0, lastCenterX: 0, lastWidth: 0 };
+    const genState = { highestGeneratedY: 0, lastCenterX: 0 };
     function lerp(a, b, t) { return a + (b - a) * t; }
     function rand(a, b) { return a + Math.random() * (b - a); }
 
-    // Every trajectory the ball can ever launch is bounded by MAX_LAUNCH_SPEED,
-    // so for a given vertical rise (gap) there's a hard physics ceiling on how
-    // far sideways a platform can be and still be reachable — the classic
-    // projectile "safety parabola": at launch speed v, the highest point
-    // reachable at horizontal distance dx is v²/(2g) − (g·dx²)/(2v²). Solving
-    // that for the max dx at a given required height gives the formula below.
-    // R = v²/g is exactly twice the max straight-up height.
-    const LAUNCH_RANGE = (MAX_LAUNCH_SPEED * MAX_LAUNCH_SPEED) / GRAVITY;
-    function maxHorizontalReach(gap) {
-      if (gap >= LAUNCH_RANGE / 2) return 0; // gap taller than any possible shot can reach at all
-      return Math.sqrt(LAUNCH_RANGE * (LAUNCH_RANGE - 2 * gap));
-    }
-
-    // Reachable isn't the same as landable. The *minimum-speed* trajectory that
-    // can just barely reach a target point always arrives exactly at the apex
-    // of its arc — meaning vy ≈ 0 there, so ALL of its remaining speed is
-    // horizontal: v_arrival ≈ dx·√(g/(2·gap)). A wide-but-shallow jump (large
-    // dx, small gap) can therefore arrive very fast horizontally even though
-    // it's comfortably inside the reachable envelope — and that speed decays
-    // via the same rolling-friction curve used at rest (`vx *= 0.02^dt`, a
-    // continuous decay rate of -ln(0.02) per second), which takes real
-    // distance to bring under the game's own RESTFUL_VX "resting" threshold.
-    // If that decay distance exceeds the platform's width, the ball rolls
-    // straight off the far edge before it can ever settle. This inverts the
-    // reachability formula to cap dx so decay finishes within the platform's
-    // own width instead.
-    const DECAY_RATE = -Math.log(0.02); // per-second decay constant matching physicsStep's rolling friction
-    const RESTFUL_VX = 14;              // matches the game's own |vx| resting threshold
-    const SAFE_LANDING_FRACTION = 0.85; // use most of the platform's width, with a margin for imprecision
-    function maxLandableReach(gap, width) {
-      if (gap <= 0) return Infinity;
-      const travelBudget = SAFE_LANDING_FRACTION * width;
-      const maxArrivalSpeed = DECAY_RATE * travelBudget + RESTFUL_VX;
-      return maxArrivalSpeed * Math.sqrt((2 * gap) / GRAVITY);
-    }
-
-    // Picks a center-x for the next platform (given the previous platform's
-    // center/width and the vertical gap to it) such that:
-    //   1. it's within the projectile's reachable envelope, AND within the
-    //      tighter distance that also lets the ball actually settle on
-    //      landing rather than rolling off the far side (both with a safety
-    //      margin, since the theoretical max requires pixel-perfect input), and
-    //   2. it doesn't sit (almost) directly above the previous platform, which
-    //      risks the ball smacking the new platform's underside on a
-    //      near-vertical launch and bouncing back down instead of landing on
-    //      top of it.
-    // If both constraints can't be satisfied at once (very rare, only possible
-    // on extremely narrow screens), the overlap-avoidance is relaxed rather
-    // than the reachability/landability ones — a landable-but-tight jump beats
-    // an unreachable or unstickable one.
-    function chooseReachableCenterX(prevCenterX, prevWidth, gap, newWidth) {
-      const SAFETY = 0.7; // stay well inside the theoretical max so imprecise drags still work
-      const reach = Math.max(newWidth, Math.min(
-        maxHorizontalReach(gap) * SAFETY,
-        maxLandableReach(gap, newWidth)
-      ));
+    // Simple, two-rule horizontal placement (deliberately not physics-derived —
+    // easier to reason about and to guarantee never leaves a gap or overlap
+    // problem, at the cost of not adapting to the vertical gap size):
+    //   1. Max horizontal distance from the previous platform's center is
+    //      capped at the new platform's own length (width) — keeps platforms
+    //      from drifting arbitrarily far apart sideways.
+    //   2. That distance must also be at least one ball-diameter — excludes
+    //      landing (almost) directly above the previous platform, which is
+    //      exactly what causes the ball to clip the new platform's underside
+    //      on a near-vertical launch and bounce back down instead of landing
+    //      on top of it.
+    // Together: never too far apart, and always leaves room to actually jump.
+    function chooseNextCenterX(prevCenterX, newWidth) {
+      const BALL_DIAMETER = BALL_RADIUS * 2;
+      const maxDist = newWidth;
+      const minDist = BALL_DIAMETER;
 
       const halfW = newWidth / 2;
       const lo = 14 + halfW;
       const hi = GAME_WIDTH - 14 - halfW;
-      let minCenter = Math.max(prevCenterX - reach, lo);
-      let maxCenter = Math.min(prevCenterX + reach, hi);
-      if (minCenter > maxCenter) {
-        // screen narrower than the platform itself allows — just center it
-        return (lo + hi) / 2;
-      }
 
-      // exclude the column directly above/below the previous platform
-      const noOverlap = (prevWidth + newWidth) / 2 + 6;
-      const forbiddenLo = prevCenterX - noOverlap;
-      const forbiddenHi = prevCenterX + noOverlap;
-
+      // valid offsets are [-maxDist,-minDist] ∪ [minDist,maxDist] from
+      // prevCenterX, each further clamped to stay on-screen
       const ranges = [];
-      if (forbiddenLo > minCenter) ranges.push([minCenter, Math.min(forbiddenLo, maxCenter)]);
-      if (forbiddenHi < maxCenter) ranges.push([Math.max(forbiddenHi, minCenter), maxCenter]);
+      const rLo = Math.max(prevCenterX + minDist, lo);
+      const rHi = Math.min(prevCenterX + maxDist, hi);
+      if (rLo <= rHi) ranges.push([rLo, rHi]);
+      const lLo = Math.max(prevCenterX - maxDist, lo);
+      const lHi = Math.min(prevCenterX - minDist, hi);
+      if (lLo <= lHi) ranges.push([lLo, lHi]);
 
-      if (ranges.length === 0) return rand(minCenter, maxCenter); // no room to dodge the overlap — reachable still wins
+      if (ranges.length === 0) {
+        // Only possible on a screen too narrow for even one ball-diameter of
+        // offset — fall back to just respecting the max-distance cap so a
+        // placement always exists.
+        const lo2 = Math.max(prevCenterX - maxDist, lo);
+        const hi2 = Math.min(prevCenterX + maxDist, hi);
+        if (lo2 <= hi2) return rand(lo2, hi2);
+        return (lo + hi) / 2; // last-resort fallback for a degenerate ultra-narrow screen
+      }
 
       const total = ranges.reduce((sum, r) => sum + (r[1] - r[0]), 0);
       let roll = Math.random() * total;
@@ -319,7 +281,7 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       let width = lerp(132, 58, t) + rand(-8, 8);
       width = Math.max(42, width);
 
-      const centerX = chooseReachableCenterX(genState.lastCenterX, genState.lastWidth, gap, width);
+      const centerX = chooseNextCenterX(genState.lastCenterX, width);
       const x = centerX - width / 2;
 
       let type = 'normal';
@@ -339,7 +301,6 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       platforms.push(plat);
       genState.highestGeneratedY = newY;
       genState.lastCenterX = centerX;
-      genState.lastWidth = width;
     }
 
     function maybeGenerateMore() {
