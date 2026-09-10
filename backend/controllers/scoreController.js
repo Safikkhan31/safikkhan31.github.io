@@ -46,7 +46,7 @@ exports.submitScore = async (req, res) => {
 exports.leaderboard = async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    const topUsers = await User.find({})
+    const topUsers = await User.find({ role: { $ne: 'admin' } })
       .sort({ highScore: -1 })
       .limit(limit)
       .select('username highScore gamesPlayed');

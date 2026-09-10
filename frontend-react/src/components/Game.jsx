@@ -552,6 +552,16 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
 
       if (ball.y < bestY) bestY = ball.y;
 
+      // Admin-only safety net: the moment the ball descends below the last
+      // checkpoint, teleport it right back. This reuses respawnAtCheckpoint()
+      // exactly as it worked before respawning was removed for everyone else —
+      // it's just gated to admins now, so testing doesn't require re-climbing
+      // from scratch after every missed jump.
+      if (isAdmin && ball.y > checkpoint.y) {
+        respawnAtCheckpoint(false);
+        return;
+      }
+
       // Hard floor — without the old "fell off screen" respawn, a long fall
       // needs a guaranteed backstop so the ball can never tunnel through the
       // thin ground platform in one big step at high fall speed. This isn't

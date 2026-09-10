@@ -137,16 +137,23 @@ Authorization: Bearer <token>
 
 ---
 
-## 5. Admin: ball trajectory debug tool
+## 5. Admin: testing tools
 
-Any account can be promoted to `admin` for testing purposes. Admins see an
-extra "Trajectory" toggle button in-game (top-left) that:
-- draws the ball's **actual** flight path (magenta line) since its last launch, and
-- while aiming, draws a **predicted** flight path (dashed cyan line) showing
-  exactly where the current drag would send the ball if released now — pure
-  ballistics simulation, no collisions — using the same physics as the real
-  game. Useful for verifying the platform-reachability guarantees while
-  testing.
+Any account can be promoted to `admin` for testing purposes. Admin accounts get:
+
+- **Checkpoint auto-respawn.** The moment the ball descends below the last
+  checkpoint it's reached, it's teleported straight back — no re-climbing
+  from scratch after a missed jump. (This is exactly the respawn behavior
+  every player used to have; it's now admin-only, since regular players are
+  meant to feel real fall consequences per the game's difficulty design.)
+- **Trajectory debug overlay** — a "Trajectory" toggle button in-game (top-left) that:
+  - draws the ball's **actual** flight path (magenta line) since its last launch, and
+  - while aiming, draws a **predicted** flight path (dashed cyan line) showing
+    exactly where the current drag would send the ball if released now — pure
+    ballistics simulation, no collisions — using the same physics as the real
+    game.
+- **Excluded from the public leaderboard** — admin scores never appear in
+  `/api/scores/leaderboard`, so testing runs don't pollute real rankings.
 
 Promoting an account requires direct server/database access (deliberately
 not exposed as an API endpoint, so nobody can grant themselves admin):
