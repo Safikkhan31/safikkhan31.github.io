@@ -137,7 +137,36 @@ Authorization: Bearer <token>
 
 ---
 
-## 5. Admin: testing tools
+## 5. Safe milestone platforms
+
+To keep a bad run from costing too much progress, a wide, stable, distinctly
+colored (gold/amber) platform is placed at 50m, 100m, 200m, 400m, and so on
+(doubling each time, up to the 500m goal). It behaves like any other
+platform — same physics, no label — just wider and a different color, so
+it's easy to recognize at a glance without calling extra attention to
+itself.
+
+It's built as **two segments with a gap (hole) between them**, rather than
+one solid slab, specifically so the ball has a real vertical path up through
+it — a fully solid platform this wide would almost always block any
+ascending shot from below (it hits the solid underside and bounces back down
+long before reaching the top, regardless of how much vertical clearance
+there is, since the platform's footprint covers nearly the entire width).
+The hole is positioned directly above wherever the ball is actually
+launching from (the previous platform's center), not fixed at the screen's
+center — otherwise it could require an unreliable, wide sideways correction
+just to line up with it. It's comfortably wider than the ball, so landing through
+it doesn't require pixel-perfect aim. Each segment is still genuinely hard
+to roll off once you're standing on it (there's real open space at the outer
+edges too — it's a safety margin, not a guarantee), and either one becomes
+your new checkpoint if it's your highest point yet.
+
+The generator also guarantees at least a 68-unit vertical gap up to it (the
+same minimum used between normal platforms), which can occasionally land it
+a few meters above its exact nominal height rather than precisely on the
+mark — a small tradeoff for guaranteeing it's always actually jumpable.
+
+## 6. Admin: testing tools
 
 Any account can be promoted to `admin` for testing purposes. Admin accounts get:
 
@@ -166,7 +195,7 @@ The `role` field (`'user'` | `'admin'`) is returned in the `/auth/me`,
 `/auth/login`, and `/auth/signup` responses, so both frontends already pick
 it up automatically on login — no other setup needed.
 
-## 6. Notes / next steps you might want
+## 7. Notes / next steps you might want
 
 - Add rate limiting (e.g. `express-rate-limit`) on `/auth/*` to slow down
   brute-force attempts.

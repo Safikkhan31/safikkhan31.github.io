@@ -508,6 +508,7 @@
     platforms.push({x:0, y:0, w:GAME_WIDTH, h:40, type:'ground'});
     genState.highestGeneratedY = 0;
     genState.lastCenterX = GAME_WIDTH / 2;
+    genState.nextMilestoneMeters = 50;
     checkpoint = { x: ball.x, y: ball.y };
     bestY = ball.y;
     bounces = 0;
@@ -523,7 +524,7 @@
   }
 
   // ---------- Procedural generation ----------
-  const genState = { highestGeneratedY: 0, lastCenterX: 0 };
+  const genState = { highestGeneratedY: 0, lastCenterX: 0, nextMilestoneMeters: 50 };
   function lerp(a,b,t){ return a + (b-a)*t; }
   function rand(a,b){ return a + Math.random()*(b-a); }
 
@@ -583,20 +584,69 @@
     const altitude = -genState.highestGeneratedY;
     const t = Math.min(1, Math.max(0, altitude / TOTAL_HEIGHT));
     const gap = lerp(78, 148, t) + rand(-10,10);
-    const newY = genState.highestGeneratedY - gap;
+    let newY = genState.highestGeneratedY - gap;
     let width = lerp(132, 58, t) + rand(-8,8);
     width = Math.max(42, width);
 
-    const centerX = chooseNextCenterX(genState.lastCenterX, width);
-    const x = centerX - width / 2;
-
     let type = 'normal';
+    let centerX;
+
+    // Milestone "safe" platforms at 50m, 100m, 200m, 400m, ... (doubling
+    // each time): much wider and always stable/stationary, so a bad run
+    // doesn't cost a huge amount of progress. Still not literally unfallable
+    // — there's real open space on both sides of it. Whenever the normal
+    // randomly-generated gap would carry the climb past the next milestone
+    // height, this band is placed at that height instead — nudged higher
+    // if needed (see MIN_GAP_TO_SAFE below).
+    const milestoneY = -(genState.nextMilestoneMeters * PIX_PER_METER);
+    if (newY <= milestoneY){
+      // Because a safe platform is so wide, it almost always horizontally
+      // overlaps whatever platform is below it — there's no "go around the
+      // side" option like with normal narrow platforms. A vertical gap alone
+      // isn't enough either: any ascending shot that enters the platform's
+      // footprint below its top surface still hits the solid underside and
+      // bounces back down, regardless of how much clearance there is. So
+      // instead of one solid slab, it's built as two segments with a real
+      // gap (hole) between them — the ball can fly straight up through that
+      // gap unobstructed, then land on either segment's top surface from
+      // above like any normal platform.
+      const MIN_GAP_TO_SAFE = 68; // matches the normal minimum step gap used elsewhere
+      newY = Math.min(milestoneY, genState.highestGeneratedY - MIN_GAP_TO_SAFE);
+      genState.nextMilestoneMeters *= 2;
+
+      const spanLeft = 40, spanRight = GAME_WIDTH - 40;
+      const holeWidth = 70; // comfortably more than the ball's diameter (26), forgiving imprecise aim
+      const minSegWidth = 20; // just enough to avoid a degenerate zero-width segment at the extreme edge
+
+      // The hole must be directly above wherever the ball is actually
+      // launching from (the previous platform's center) — otherwise it can
+      // require a wide, unreliable sideways correction to even line up with
+      // it. Clamped only enough to keep the hole fully on-screen.
+      const minHoleCenter = spanLeft + minSegWidth + holeWidth/2;
+      const maxHoleCenter = spanRight - minSegWidth - holeWidth/2;
+      const holeCenter = minHoleCenter <= maxHoleCenter
+        ? Math.min(maxHoleCenter, Math.max(minHoleCenter, genState.lastCenterX))
+        : (spanLeft + spanRight) / 2; // degenerate ultra-narrow screen fallback
+
+      const holeStart = holeCenter - holeWidth/2;
+      const holeEnd = holeCenter + holeWidth/2;
+
+      platforms.push({ x: spanLeft, y: newY, w: holeStart - spanLeft, h: 16, type: 'safe' });
+      platforms.push({ x: holeEnd, y: newY, w: spanRight - holeEnd, h: 16, type: 'safe' });
+      genState.highestGeneratedY = newY;
+      genState.lastCenterX = holeCenter;
+      return;
+    }
+
+    centerX = chooseNextCenterX(genState.lastCenterX, width);
+
     const hazardChance = t > 0.42 ? lerp(0, 0.22, (t-0.42)/0.58) : 0;
     const movingChance = t > 0.2 ? lerp(0, 0.32, (t-0.2)/0.8) : 0;
     const roll = Math.random();
     if (roll < hazardChance) type = 'hazard';
     else if (roll < hazardChance + movingChance) type = 'moving';
 
+    const x = centerX - width / 2;
     const plat = { x, y:newY, w:width, h:16, type };
     if (type === 'moving'){
       plat.vx = (Math.random()<0.5?-1:1) * lerp(35,95,t);
@@ -1173,6 +1223,7 @@
     let fill, stroke;
     if (p.type === 'moving'){ fill = '#3f9c8a'; stroke='#2c7566'; }
     else if (p.type === 'hazard'){ fill = '#e63950'; stroke='#a5233a'; }
+    else if (p.type === 'safe'){ fill = '#ffd166'; stroke='#c99a3a'; }
     else { fill = '#7c8f78'; stroke='#5c6b58'; }
 
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
