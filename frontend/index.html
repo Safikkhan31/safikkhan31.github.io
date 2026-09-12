@@ -511,6 +511,7 @@
     platforms.push({x:0, y:0, w:GAME_WIDTH, h:40, type:'ground'});
     genState.highestGeneratedY = 0;
     genState.lastCenterX = GAME_WIDTH / 2;
+    genState.lastType = 'normal';
     genState.nextMilestoneMeters = 50;
     checkpoint = { x: ball.x, y: ball.y };
     bestY = ball.y;
@@ -527,7 +528,7 @@
   }
 
   // ---------- Procedural generation ----------
-  const genState = { highestGeneratedY: 0, lastCenterX: 0, nextMilestoneMeters: 50 };
+  const genState = { highestGeneratedY: 0, lastCenterX: 0, nextMilestoneMeters: 50, lastType: 'normal' };
   function lerp(a,b,t){ return a + (b-a)*t; }
   function rand(a,b){ return a + Math.random()*(b-a); }
 
@@ -643,19 +644,25 @@
 
     centerX = chooseNextCenterX(genState.lastCenterX, width);
 
-    const hazardChance = t > 0.42 ? lerp(0, 0.22, (t-0.42)/0.58) : 0;
+    // Hazard platforms were removed: some jumps to the platform above one
+    // were unreachable, and two hazards could occasionally land back to
+    // back, both of which made the climb unfairly (rather than
+    // intentionally) difficult.
     const movingChance = t > 0.2 ? lerp(0, 0.32, (t-0.2)/0.8) : 0;
     const roll = Math.random();
-    if (roll < hazardChance) type = 'hazard';
-    else if (roll < hazardChance + movingChance) type = 'moving';
+    // Never two moving platforms in a row — keeps a stable platform between
+    // them so there's always a reliable place to land and reset your aim.
+    if (roll < movingChance && genState.lastType !== 'moving') type = 'moving';
+    genState.lastType = type;
 
     const x = centerX - width / 2;
     const plat = { x, y:newY, w:width, h:16, type };
     if (type === 'moving'){
       plat.vx = (Math.random()<0.5?-1:1) * lerp(35,95,t);
-      plat.minX = Math.max(8, x-70);
-      plat.maxX = Math.min(GAME_WIDTH-width-8, x+70);
-      if (plat.maxX < plat.minX) plat.maxX = plat.minX;
+      // Patrols the full screen width (not just a small range near where it
+      // spawned), as requested.
+      plat.minX = 8;
+      plat.maxX = GAME_WIDTH - width - 8;
     }
     platforms.push(plat);
     genState.highestGeneratedY = newY;
@@ -664,11 +671,9 @@
 
   function maybeGenerateMore(){
     while (genState.highestGeneratedY > cameraTop - 500) generateNextBand();
-    // trim far-below platforms
-    if (platforms.length > 5){
-      const cutoff = ball.y + viewH * 2.2;
-      platforms = platforms.filter(p => p.type === 'ground' || p.y < cutoff);
-    }
+    // Platforms are intentionally never removed once generated — falling
+    // back down (e.g. after missing a jump, or hitting the hard floor)
+    // needs something left to climb back up on.
   }
 
   // ---------- Input ----------
@@ -796,7 +801,7 @@
 
     let target = null;
     for (const p of platforms){
-      if (p.type === 'hazard' || p.type === 'ground') continue;
+      if (p.type === 'ground') continue;
       if (p.y < ball.y - 1 && (!target || p.y > target.y)) target = p;
     }
     if (!target) return;
@@ -841,10 +846,10 @@
     return {nx, ny, pen: r - dist};
   }
 
-  // Kept intact and fully working, but nothing calls it automatically anymore
-  // (see the hazard/fall-off handling in physicsStep below). This is here so
-  // a future "watch an ad to respawn at your checkpoint" feature can just
-  // call this directly without rebuilding the reset logic.
+  // The only caller today is the admin-only test-mode checkpoint teleport
+  // below (always with hazard=false, since hazard platforms no longer
+  // exist). Kept as a reusable, fully self-contained reset so a future
+  // "watch an ad to respawn at your checkpoint" feature could call it too.
   function respawnAtCheckpoint(hazard){
     ball.x = checkpoint.x; ball.y = checkpoint.y;
     ball.vx = 0; ball.vy = 0;
@@ -867,7 +872,23 @@
 
   function physicsStep(dt){
     if (won) return;
-    if (dragging) return;
+    if (dragging){
+      // Aiming on a moving platform: carry the ball along with it exactly
+      // like the resting case below. dragStart/dragCurrent are deliberately
+      // left untouched — onPointerMove recomputes dragCurrent fresh from the
+      // live pointer position every time it fires, so trying to carry it
+      // here would just get overwritten (and conflict) the moment the
+      // pointer moves at all. Since the elastic band is drawn from the
+      // ball's current position outward by the (dragCurrent - dragStart)
+      // offset — not between two fixed absolute points — carrying just the
+      // ball is enough: the whole band rides along with it automatically,
+      // while its stretch/direction still responds purely to actual pointer
+      // movement.
+      if (ball.standingOn && ball.standingOn.type === 'moving'){
+        ball.x += ball.standingOn.vx * dt;
+      }
+      return;
+    }
     if (ball.isResting){
       // The ball still needs to ride along with whatever it's resting on —
       // the early return below used to skip this entirely once fully
@@ -926,28 +947,17 @@
         ball.vy = vty + nvn*col.ny;
 
         if (Math.abs(vn) > 90){
-          if (p.type === 'hazard'){
-            // No more free reset to checkpoint — a hazard now just hurts
-            // (flash/shake/buzz) and bounces you like a rough platform.
-            // You keep whatever position/momentum you land with.
-            flashTime = 0.16;
-            shakeTime = 0.25; shakeMag = 10;
-            beep(140, 0.22, 'sawtooth', 0.15);
-          } else {
-            bounces++;
-            const impact = Math.min(1, Math.abs(vn)/2400);
-            ball.squashAmt = Math.max(0.42, 1 - impact*0.62);
-            ball.squashVel = 0;
-            ball.squashAngle = Math.atan2(col.ny, col.nx);
-            const f = 210 + Math.min(300, Math.abs(vn)/5);
-            beep(f, 0.08, 'triangle', Math.min(0.2, 0.05 + impact*0.16));
-          }
+          bounces++;
+          const impact = Math.min(1, Math.abs(vn)/2400);
+          ball.squashAmt = Math.max(0.42, 1 - impact*0.62);
+          ball.squashVel = 0;
+          ball.squashAngle = Math.atan2(col.ny, col.nx);
+          const f = 210 + Math.min(300, Math.abs(vn)/5);
+          beep(f, 0.08, 'triangle', Math.min(0.2, 0.05 + impact*0.16));
         }
       }
       hadContact = true;
-      // Hazards are dangerous ground, never a safe place to "stand" —
-      // they can't become your checkpoint or stop a fall into resting.
-      if (col.ny < -0.55 && p.type !== 'hazard') frameStanding = p;
+      if (col.ny < -0.55) frameStanding = p;
     }
 
     // moving platform carry
@@ -1266,7 +1276,6 @@
     }
     let fill, stroke;
     if (p.type === 'moving'){ fill = '#3f9c8a'; stroke='#2c7566'; }
-    else if (p.type === 'hazard'){ fill = '#e63950'; stroke='#a5233a'; }
     else if (p.type === 'safe'){ fill = '#ffd166'; stroke='#c99a3a'; }
     else { fill = '#7c8f78'; stroke='#5c6b58'; }
 
@@ -1282,19 +1291,6 @@
     roundRect(p.x, sy, p.w, p.h, 5);
     ctx.stroke();
 
-    if (p.type === 'hazard'){
-      ctx.fillStyle = '#ffd7dc';
-      const spikeCount = Math.max(2, Math.floor(p.w/16));
-      const sw = p.w/spikeCount;
-      for (let i=0;i<spikeCount;i++){
-        ctx.beginPath();
-        ctx.moveTo(p.x+i*sw, sy);
-        ctx.lineTo(p.x+i*sw+sw/2, sy-7);
-        ctx.lineTo(p.x+(i+1)*sw, sy);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
     if (p.type === 'moving'){
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.font = '700 9px sans-serif';
