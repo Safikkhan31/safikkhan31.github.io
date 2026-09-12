@@ -80,7 +80,8 @@ html,body,#root{
 }
 .pillBtn:active{transform:scale(0.94);}
 #leaderboardBtn{bottom:16px;right:14px;}
-#trajectoryBtn{top:64px;left:14px;}
+#testBtn{top:64px;left:14px;}
+#skipBtn{top:64px;right:14px;}
 
 /* ---------- Leaderboard (full page, not an overlay) ---------- */
 #leaderboardPage{

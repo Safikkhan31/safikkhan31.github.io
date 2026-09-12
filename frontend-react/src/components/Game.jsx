@@ -163,14 +163,16 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
     let started = false;
     let lastTime = null;
 
-    // ---------- Admin-only trajectory debug tools ----------
+    // ---------- Admin-only testing tools ----------
     // `user` is already resolved by the time Game mounts, so this can be
     // read directly instead of listening for an auth-ready event.
     const isAdmin = !!(user && user.role === 'admin');
-    let showTrajectory = false;
+    let testMode = false; // toggles BOTH the trajectory overlay and the checkpoint auto-teleport together
     let adminTrail = []; // full actual flight path since the last launch (admin-only)
-    const trajectoryBtn = document.getElementById('trajectoryBtn');
-    if (trajectoryBtn) trajectoryBtn.classList.toggle('hidden', !isAdmin);
+    const testBtn = document.getElementById('testBtn');
+    if (testBtn) testBtn.classList.toggle('hidden', !isAdmin);
+    const skipBtn = document.getElementById('skipBtn');
+    if (skipBtn) skipBtn.classList.toggle('hidden', !isAdmin);
 
     function metersOf(worldYNegated) { return Math.max(0, Math.round(worldYNegated / PIX_PER_METER)); }
 
@@ -436,12 +438,45 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
     }
     leaderboardBtn.addEventListener('click', onLeaderboardClick);
 
-    function onTrajectoryClick() {
-      showTrajectory = !showTrajectory;
-      trajectoryBtn.textContent = 'Trajectory: ' + (showTrajectory ? 'On' : 'Off');
-      if (!showTrajectory) adminTrail = [];
+    function onTestModeClick() {
+      testMode = !testMode;
+      testBtn.textContent = 'Test: ' + (testMode ? 'On' : 'Off');
+      if (!testMode) adminTrail = [];
     }
-    if (trajectoryBtn) trajectoryBtn.addEventListener('click', onTrajectoryClick);
+    if (testBtn) testBtn.addEventListener('click', onTestModeClick);
+
+    // Admin-only: jump straight to the next platform above the ball's current
+    // position, so testing higher parts of the climb doesn't require actually
+    // playing through every platform below it. Not gated by testMode — it's a
+    // one-shot action, not a standing behavior toggle.
+    function skipToNextPlatform() {
+      if (!isAdmin) return;
+      while (genState.highestGeneratedY > ball.y - 40) generateNextBand();
+
+      let target = null;
+      for (const p of platforms) {
+        if (p.type === 'hazard' || p.type === 'ground') continue;
+        if (p.y < ball.y - 1 && (!target || p.y > target.y)) target = p;
+      }
+      if (!target) return;
+
+      ball.x = target.x + target.w / 2;
+      ball.y = target.y - BALL_RADIUS;
+      ball.vx = 0; ball.vy = 0;
+      ball.isResting = true; ball.restTimer = 99; ball.standingOn = target;
+      ball.squashAmt = 1; ball.squashVel = 0;
+
+      if (ball.y < bestY) bestY = ball.y;
+      if (ball.y < checkpoint.y) {
+        checkpoint = { x: ball.x, y: ball.y };
+        recordPotentialNewBest(metersOf(-checkpoint.y));
+      }
+
+      cameraTop = ball.y - viewH * 0.62;
+      maybeGenerateMore();
+      updateHud();
+    }
+    if (skipBtn) skipBtn.addEventListener('click', skipToNextPlatform);
 
     // ---------- Physics ----------
     function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
@@ -491,7 +526,15 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
 
     function physicsStep(dt) {
       if (won) return;
-      if (dragging || ball.isResting) {
+      if (dragging) return;
+      if (ball.isResting) {
+        // The ball still needs to ride along with whatever it's resting on —
+        // the early return used to skip this entirely once fully settled,
+        // leaving the ball behind while a moving platform slid out from
+        // under it.
+        if (ball.standingOn && ball.standingOn.type === 'moving') {
+          ball.x += ball.standingOn.vx * dt;
+        }
         return;
       }
 
@@ -501,7 +544,7 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       ball.x += ball.vx * dt;
       ball.y += ball.vy * dt;
 
-      if (isAdmin && showTrajectory) {
+      if (isAdmin && testMode) {
         adminTrail.push({ x: ball.x, y: ball.y });
         if (adminTrail.length > 4000) adminTrail.shift(); // safety cap, not expected to matter in practice
       }
@@ -605,9 +648,9 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       // Admin-only safety net: the moment the ball descends below the last
       // checkpoint, teleport it right back. This reuses respawnAtCheckpoint()
       // exactly as it worked before respawning was removed for everyone else —
-      // it's just gated to admins now, so testing doesn't require re-climbing
-      // from scratch after every missed jump.
-      if (isAdmin && ball.y > checkpoint.y) {
+      // it's just gated to admins (and only while testMode is on) now, so
+      // testing doesn't require re-climbing from scratch after every missed jump.
+      if (isAdmin && testMode && ball.y > checkpoint.y) {
         respawnAtCheckpoint(false);
         return;
       }
@@ -813,8 +856,8 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
         ctx.fill();
       }
 
-      // ---------- Admin-only trajectory debug overlay ----------
-      if (isAdmin && showTrajectory) {
+      // ---------- Admin-only test-mode overlay ----------
+      if (isAdmin && testMode) {
         if (dragging) {
           drawPredictedTrajectory();
         }
@@ -1026,7 +1069,8 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       playAgainBtn.removeEventListener('click', onPlayAgainClick);
       restartBtn.removeEventListener('click', onRestartClick);
       leaderboardBtn.removeEventListener('click', onLeaderboardClick);
-      if (trajectoryBtn) trajectoryBtn.removeEventListener('click', onTrajectoryClick);
+      if (testBtn) testBtn.removeEventListener('click', onTestModeClick);
+      if (skipBtn) skipBtn.removeEventListener('click', skipToNextPlatform);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1051,7 +1095,8 @@ export default function Game({ user, onLogout, onSubmitScore, onReportProgress }
       <div className="btn" id="restartBtn" title="Restart">↺</div>
       <div className="btn" id="muteBtn" title="Mute">🔊</div>
       <div className="pillBtn" id="leaderboardBtn">Leaderboard</div>
-      <div className="pillBtn hidden" id="trajectoryBtn">Trajectory: Off</div>
+      <div className="pillBtn hidden" id="testBtn">Test: Off</div>
+      <div className="pillBtn hidden" id="skipBtn">Skip ▲</div>
 
       <div className="hud" id="bounceCounter">Bounces: 0</div>
 

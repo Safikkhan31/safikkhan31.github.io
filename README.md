@@ -170,17 +170,24 @@ mark — a small tradeoff for guaranteeing it's always actually jumpable.
 
 Any account can be promoted to `admin` for testing purposes. Admin accounts get:
 
-- **Checkpoint auto-respawn.** The moment the ball descends below the last
-  checkpoint it's reached, it's teleported straight back — no re-climbing
-  from scratch after a missed jump. (This is exactly the respawn behavior
-  every player used to have; it's now admin-only, since regular players are
-  meant to feel real fall consequences per the game's difficulty design.)
-- **Trajectory debug overlay** — a "Trajectory" toggle button in-game (top-left) that:
-  - draws the ball's **actual** flight path (magenta line) since its last launch, and
-  - while aiming, draws a **predicted** flight path (dashed cyan line) showing
-    exactly where the current drag would send the ball if released now — pure
-    ballistics simulation, no collisions — using the same physics as the real
-    game.
+- **A "Test" toggle button** (top-left) that turns two things on/off together:
+  - **Checkpoint auto-respawn** — the moment the ball descends below the last
+    checkpoint it's reached, it's teleported straight back — no re-climbing
+    from scratch after a missed jump. (This is exactly the respawn behavior
+    every player used to have; it's now admin-only and opt-in via this
+    toggle, since regular players are meant to feel real fall consequences
+    per the game's difficulty design.)
+  - **Trajectory overlay** — draws the ball's **actual** flight path (magenta
+    line) since its last launch, and while aiming, a **predicted** flight
+    path (dashed cyan line) showing exactly where the current drag would
+    send the ball if released now — pure ballistics simulation, no
+    collisions, using the same physics as the real game.
+- **A "Skip ▲" button** (top-right, always available whenever logged in as
+  admin — not tied to the Test toggle) that jumps the ball straight to the
+  next platform above its current position. Useful for testing higher parts
+  of the climb without having to actually play through every platform below
+  it. Generates more of the level ahead as needed, and still updates the
+  checkpoint/best-score tracking normally if the skip reaches a new high point.
 - **Excluded from the public leaderboard** — admin scores never appear in
   `/api/scores/leaderboard`, so testing runs don't pollute real rankings.
 

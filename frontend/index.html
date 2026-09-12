@@ -89,7 +89,8 @@
   }
   .pillBtn:active{transform:scale(0.94);}
   #leaderboardBtn{bottom:16px;right:14px;}
-  #trajectoryBtn{top:64px;left:14px;}
+  #testBtn{top:64px;left:14px;}
+  #skipBtn{top:64px;right:14px;}
 
   /* ---------- Leaderboard (full page, not an overlay) ---------- */
   #leaderboardPage{
@@ -221,7 +222,8 @@
     <div class="btn" id="restartBtn" title="Restart">↺</div>
     <div class="btn" id="muteBtn" title="Mute">🔊</div>
     <div class="pillBtn" id="leaderboardBtn">Leaderboard</div>
-    <div class="pillBtn hidden" id="trajectoryBtn">Trajectory: Off</div>
+    <div class="pillBtn hidden" id="testBtn">Test: Off</div>
+    <div class="pillBtn hidden" id="skipBtn">Skip ▲</div>
 
     <div class="hud" id="bounceCounter">Bounces: 0</div>
 
@@ -445,7 +447,8 @@
       updateHud();
     }
     isAdmin = !!(user && user.role === 'admin');
-    document.getElementById('trajectoryBtn').classList.toggle('hidden', !isAdmin);
+    document.getElementById('testBtn').classList.toggle('hidden', !isAdmin);
+    document.getElementById('skipBtn').classList.toggle('hidden', !isAdmin);
     document.getElementById('introOverlay').classList.remove('hidden');
   });
 
@@ -475,9 +478,9 @@
   let started = false;
   let lastTime = null;
 
-  // ---------- Admin-only trajectory debug tools ----------
+  // ---------- Admin-only testing tools ----------
   let isAdmin = false;
-  let showTrajectory = false;
+  let testMode = false; // toggles BOTH the trajectory overlay and the checkpoint auto-teleport together
   let adminTrail = []; // full actual flight path since the last launch (admin-only)
 
   function metersOf(worldYNegated){ return Math.max(0, Math.round(worldYNegated / PIX_PER_METER)); }
@@ -777,11 +780,44 @@
   });
 
   // ---------- Admin trajectory toggle ----------
-  document.getElementById('trajectoryBtn').addEventListener('click', ()=>{
-    showTrajectory = !showTrajectory;
-    document.getElementById('trajectoryBtn').textContent = 'Trajectory: ' + (showTrajectory ? 'On' : 'Off');
-    if (!showTrajectory) adminTrail = [];
+  document.getElementById('testBtn').addEventListener('click', ()=>{
+    testMode = !testMode;
+    document.getElementById('testBtn').textContent = 'Test: ' + (testMode ? 'On' : 'Off');
+    if (!testMode) adminTrail = [];
   });
+
+  // Admin-only: jump straight to the next platform above the ball's current
+  // position, so testing higher parts of the climb doesn't require actually
+  // playing through every platform below it. Not gated by testMode — it's a
+  // one-shot action, not a standing behavior toggle.
+  function skipToNextPlatform(){
+    if (!isAdmin) return;
+    while (genState.highestGeneratedY > ball.y - 40) generateNextBand();
+
+    let target = null;
+    for (const p of platforms){
+      if (p.type === 'hazard' || p.type === 'ground') continue;
+      if (p.y < ball.y - 1 && (!target || p.y > target.y)) target = p;
+    }
+    if (!target) return;
+
+    ball.x = target.x + target.w / 2;
+    ball.y = target.y - BALL_RADIUS;
+    ball.vx = 0; ball.vy = 0;
+    ball.isResting = true; ball.restTimer = 99; ball.standingOn = target;
+    ball.squashAmt = 1; ball.squashVel = 0;
+
+    if (ball.y < bestY) bestY = ball.y;
+    if (ball.y < checkpoint.y){
+      checkpoint = { x: ball.x, y: ball.y };
+      recordPotentialNewBest(metersOf(-checkpoint.y));
+    }
+
+    cameraTop = ball.y - viewH * 0.62;
+    maybeGenerateMore();
+    updateHud();
+  }
+  document.getElementById('skipBtn').addEventListener('click', skipToNextPlatform);
 
   // ---------- Physics ----------
   function circleRectCollision(cx, cy, r, rx, ry, rw, rh){
@@ -831,7 +867,15 @@
 
   function physicsStep(dt){
     if (won) return;
-    if (dragging || ball.isResting) {
+    if (dragging) return;
+    if (ball.isResting){
+      // The ball still needs to ride along with whatever it's resting on —
+      // the early return below used to skip this entirely once fully
+      // settled, leaving the ball behind while a moving platform slid out
+      // from under it.
+      if (ball.standingOn && ball.standingOn.type === 'moving'){
+        ball.x += ball.standingOn.vx * dt;
+      }
       return;
     }
 
@@ -841,7 +885,7 @@
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
 
-    if (isAdmin && showTrajectory){
+    if (isAdmin && testMode){
       adminTrail.push({x: ball.x, y: ball.y});
       if (adminTrail.length > 4000) adminTrail.shift(); // safety cap, not expected to matter in practice
     }
@@ -945,9 +989,9 @@
     // Admin-only safety net: the moment the ball descends below the last
     // checkpoint, teleport it right back. This reuses respawnAtCheckpoint()
     // exactly as it worked before respawning was removed for everyone else —
-    // it's just gated to admins now, so testing doesn't require re-climbing
-    // from scratch after every missed jump.
-    if (isAdmin && ball.y > checkpoint.y){
+    // it's just gated to admins (and only while testMode is on) now, so
+    // testing doesn't require re-climbing from scratch after every missed jump.
+    if (isAdmin && testMode && ball.y > checkpoint.y){
       respawnAtCheckpoint(false);
       return;
     }
@@ -1153,8 +1197,8 @@
       ctx.fill();
     }
 
-    // ---------- Admin-only trajectory debug overlay ----------
-    if (isAdmin && showTrajectory){
+    // ---------- Admin-only test-mode overlay ----------
+    if (isAdmin && testMode){
       if (dragging){
         drawPredictedTrajectory();
       }
